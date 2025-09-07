@@ -7,13 +7,15 @@ import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.stereotype.Component;
 
+import static com.fonseca.algaposts.postService.infrastructure.rabbitmq.RabbitConfig.RESULT_QUEUE;
+
 @Component
 @RequiredArgsConstructor
 public class RabbitListenerConfig {
 
     private final PostService postService;
 
-    @RabbitListener(queues = RabbitConfig.RESULT_QUEUE)
+    @RabbitListener(queues = RESULT_QUEUE)
     public void consumeProcessingMessage(@Payload ProcessingResultMessage result) {
         postService.updatePostInfo(result);
     }

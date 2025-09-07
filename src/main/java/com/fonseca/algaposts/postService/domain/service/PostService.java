@@ -5,6 +5,7 @@ import com.fonseca.algaposts.postService.domain.model.Post;
 import com.fonseca.algaposts.postService.domain.repository.PostRepository;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.core.AmqpTemplate;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PagedModel;
@@ -21,6 +22,7 @@ import static com.fonseca.algaposts.postService.infrastructure.rabbitmq.RabbitCo
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class PostService {
 
     private final PostRepository postRepository;
@@ -28,6 +30,7 @@ public class PostService {
 
     @Transactional
     public PostOutput create(PostInput input) {
+        log.info("Criando novo post - título: '{}', autor: '{}'", input.getTitle(), input.getAuthor());
         UUID id = UUID.randomUUID();
         Post post = new Post();
         post.setId(id);
@@ -36,19 +39,43 @@ public class PostService {
         post.setAuthor(input.getAuthor());
         postRepository.saveAndFlush(post);
 
-        amqpTemplate.convertAndSend(POST_QUEUE, new TextProcessingMessageRequest(id, input.getBody()));
+        try {
+            postRepository.saveAndFlush(post);
+            log.debug("Post salvo no banco - ID: {}", id);
 
-        return new PostOutput(id, post.getTitle(), post.getBody(),
-                post.getAuthor(), null, null);
+            amqpTemplate.convertAndSend(POST_QUEUE, new TextProcessingMessageRequest(id, input.getBody()));
+            log.debug("Post enviado para processamento - ID: {}", id);
+
+            log.info("Post criado com sucesso - ID: {}", id);
+            return new PostOutput(id, post.getTitle(), post.getBody(), post.getAuthor(), null, null);
+
+        } catch (Exception e) {
+            log.error("Erro ao criar post - título: '{}', erro: {}", input.getTitle(), e.getMessage(), e);
+            throw e;
+        }
     }
 
     @Transactional
     public void updatePostInfo(ProcessingResultMessage result) {
-        Post post = postRepository.findById(result.getPostId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
-        post.setWordCount(result.getWordCount());
-        post.setCalculatedValue(result.getCalculatedValue());
-        postRepository.save(post);
+        log.info("Atualizando post processado - ID: {}, palavras: {}, valor: {}",
+                result.getPostId(), result.getWordCount(), result.getCalculatedValue());
+        try {
+            Post post = postRepository.findById(result.getPostId())
+                    .orElseThrow(() -> {
+                        log.warn("Post não encontrado para atualização - ID: {}", result.getPostId());
+                        return new ResponseStatusException(HttpStatus.NOT_FOUND);
+                    });
+
+            post.setWordCount(result.getWordCount());
+            post.setCalculatedValue(result.getCalculatedValue());
+            postRepository.save(post);
+
+            log.info("Post atualizado com sucesso - ID: {}", result.getPostId());
+
+        } catch (Exception e) {
+            log.error("Erro ao atualizar post - ID: {}, erro: {}", result.getPostId(), e.getMessage(), e);
+            throw e;
+        }
     }
 
     public PostOutput findById(UUID id) {
